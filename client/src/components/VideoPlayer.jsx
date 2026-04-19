@@ -1,21 +1,6 @@
-import { useRef, useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRoom } from '../context/RoomContext';
 import { useSocket } from '../hooks/useSocket';
-
-// Load YouTube IFrame API
-const loadYouTubeAPI = () => {
-  return new Promise((resolve) => {
-    if (window.YT && window.YT.Player) {
-      resolve(window.YT);
-      return;
-    }
-    
-    const tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
-    window.onYouTubeIframeAPIReady = () => resolve(window.YT);
-    document.body.appendChild(tag);
-  });
-};
 
 // Extract YouTube video ID
 const getYouTubeId = (url) => {
@@ -37,106 +22,82 @@ const getVimeoId = (url) => {
 };
 
 const VideoPlayer = () => {
-  const playerContainerRef = useRef(null);
-  const ytPlayerRef = useRef(null);
   const { roomId, videoUrl, setVideoUrl, participants } = useRoom();
   const { updateVideo, videoStateChange, on, off } = useSocket();
-  
   const [inputUrl, setInputUrl] = useState('');
-  const [isReady, setIsReady] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const isSyncing = useRef(false);
 
-  // Determine video type and ID
+  // Get video IDs
   const youtubeId = videoUrl ? getYouTubeId(videoUrl) : null;
   const vimeoId = videoUrl ? getVimeoId(videoUrl) : null;
-  const isYouTube = !!youtubeId;
-  const isVimeo = !!vimeoId;
 
-  // Initialize YouTube player
-  useEffect(() => {
-    if (!isYouTube || !youtubeId) return;
-
-    let player = null;
-
-    const initPlayer = async () => {
-      const YT = await loadYouTubeAPI();
-      
-      player = new YT.Player(playerContainerRef.current, {
-        videoId: youtubeId,
-        width: '100%',
-        height: '100%',
-        playerVars: {
-          autoplay: 0,
-          rel: 0,
-          modestbranding: 1,
-          origin: window.location.origin
-        },
-        events: {
-          onReady: (event) => {
-            ytPlayerRef.current = event.target;
-            setIsReady(true);
-          },
-          onStateChange: (event) => {
-            if (isSyncing.current) return;
-            
-            // event.data: -1=unstarted, 0=ended, 1=playing, 2=paused, 3=buffering, 5=video cued
-            if (event.data === 1) { // Playing
-              videoStateChange({
-                roomId,
-                state: { isPlaying: true, currentTime: event.target.getCurrentTime() }
-              });
-            } else if (event.data === 2) { // Paused
-              videoStateChange({
-                roomId,
-                state: { isPlaying: false, currentTime: event.target.getCurrentTime() }
-              });
-            }
-          }
-        }
+  // Generate embed URLs with sync parameters
+  const getEmbedUrl = () => {
+    if (youtubeId) {
+      // YouTube embed with autoplay based on sync state
+      const params = new URLSearchParams({
+        autoplay: isPlaying ? '1' : '0',
+        rel: '0',
+        modestbranding: '1',
+        playsinline: '1'
       });
-    };
+      return `https://www.youtube.com/embed/${youtubeId}?${params}`;
+    }
+    if (vimeoId) {
+      const params = new URLSearchParams({
+        autoplay: isPlaying ? '1' : '0',
+        playsinline: '1'
+      });
+      return `https://player.vimeo.com/video/${vimeoId}?${params}`;
+    }
+    return null;
+  };
 
-    initPlayer();
+  // Handle video URL update
+  const handleUpdateVideo = (e) => {
+    e.preventDefault();
+    if (inputUrl.trim()) {
+      updateVideo({ roomId, videoUrl: inputUrl.trim() });
+      setVideoUrl(inputUrl.trim());
+      setInputUrl('');
+      setIsPlaying(false);
+    }
+  };
 
-    return () => {
-      if (player && player.destroy) {
-        player.destroy();
-      }
-      ytPlayerRef.current = null;
-      setIsReady(false);
-    };
-  }, [isYouTube, youtubeId, roomId, videoStateChange]);
+  // Manual play/pause handlers
+  const handlePlay = () => {
+    if (isSyncing.current) return;
+    setIsPlaying(true);
+    videoStateChange({
+      roomId,
+      state: { isPlaying: true, currentTime: 0 }
+    });
+  };
 
-  // Listen for video state sync from server
+  const handlePause = () => {
+    if (isSyncing.current) return;
+    setIsPlaying(false);
+    videoStateChange({
+      roomId,
+      state: { isPlaying: false, currentTime: 0 }
+    });
+  };
+
+  // Listen for sync events
   useEffect(() => {
-    const handleVideoStateSync = ({ isPlaying: shouldPlay, currentTime }) => {
-      if (!ytPlayerRef.current || isSyncing.current) return;
-      
+    const handleVideoStateSync = ({ isPlaying: shouldPlay }) => {
+      if (isSyncing.current) return;
       isSyncing.current = true;
-      
-      const player = ytPlayerRef.current;
-      const currentPlayerTime = player.getCurrentTime();
-      
-      // Sync time if difference is more than 2 seconds
-      if (Math.abs(currentPlayerTime - currentTime) > 2) {
-        player.seekTo(currentTime, true);
-      }
-      
-      // Sync play/pause
-      if (shouldPlay) {
-        player.playVideo();
-      } else {
-        player.pauseVideo();
-      }
-      
+      setIsPlaying(shouldPlay);
       setTimeout(() => {
         isSyncing.current = false;
-      }, 500);
+      }, 300);
     };
 
     const handleVideoUpdated = ({ videoUrl: newUrl }) => {
       setVideoUrl(newUrl);
-      setIsReady(false);
+      setIsPlaying(false);
     };
 
     on('video-state-sync', handleVideoStateSync);
@@ -148,24 +109,7 @@ const VideoPlayer = () => {
     };
   }, [on, off, setVideoUrl]);
 
-  // Handle video URL update
-  const handleUpdateVideo = (e) => {
-    e.preventDefault();
-    if (inputUrl.trim()) {
-      updateVideo({ roomId, videoUrl: inputUrl.trim() });
-      setVideoUrl(inputUrl.trim());
-      setInputUrl('');
-      setIsReady(false);
-    }
-  };
-
-  // Generate Vimeo embed URL
-  const getVimeoEmbedUrl = () => {
-    if (isVimeo) {
-      return `https://player.vimeo.com/video/${vimeoId}`;
-    }
-    return null;
-  };
+  const embedUrl = getEmbedUrl();
 
   return (
     <div className="video-player-container">
@@ -177,16 +121,16 @@ const VideoPlayer = () => {
       </div>
 
       <div className="player-wrapper">
-        {isYouTube ? (
-          <div ref={playerContainerRef} style={{ width: '100%', height: '100%' }} />
-        ) : isVimeo ? (
+        {embedUrl ? (
           <iframe
-            src={getVimeoEmbedUrl()}
+            key={embedUrl} // Force re-render when URL changes
+            src={embedUrl}
             width="100%"
             height="100%"
             frameBorder="0"
-            allow="autoplay; fullscreen; picture-in-picture"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
+            title="Video Player"
           />
         ) : videoUrl ? (
           <div className="no-video">
@@ -207,6 +151,17 @@ const VideoPlayer = () => {
         )}
       </div>
 
+      {embedUrl && (
+        <div className="video-controls">
+          <button className="control-btn" onClick={handlePlay}>
+            ▶️ Sync Play
+          </button>
+          <button className="control-btn" onClick={handlePause}>
+            ⏸️ Sync Pause
+          </button>
+        </div>
+      )}
+
       <form className="video-input-form" onSubmit={handleUpdateVideo}>
         <input
           type="url"
@@ -214,10 +169,7 @@ const VideoPlayer = () => {
           onChange={(e) => setInputUrl(e.target.value)}
           placeholder="Paste YouTube or Vimeo URL..."
         />
-        <button 
-          type="submit" 
-          disabled={!inputUrl.trim()}
-        >
+        <button type="submit" disabled={!inputUrl.trim()}>
           Load Video
         </button>
       </form>

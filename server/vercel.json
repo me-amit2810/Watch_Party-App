@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "name": "watchyyy-server",
+  "builds": [
+    {
+      "src": "src/server.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "src/server.js"
+    }
+  ],
+  "env": {
+    "MONGODB_URI": "@mongodb_uri",
+    "PORT": "3000"
+  }
+}
