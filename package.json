@@ -1,0 +1,18 @@
+{
+  "name": "watchyyy",
+  "version": "1.0.0",
+  "description": "Watch party app with MERN stack - synchronized video, chat, and video calling",
+  "main": "index.js",
+  "scripts": {
+    "install-all": "npm install && cd server && npm install && cd ../client && npm install",
+    "dev": "concurrently \"cd server && npm run dev\" \"cd client && npm run dev\"",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm run dev"
+  },
+  "keywords": ["watch-party", "mern", "webrtc", "socket.io"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
